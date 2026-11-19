@@ -49,6 +49,7 @@ WINDOWS_DRIVER = (
 LINUX_OS = (
     "linux-vdso.so.1", "ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1", "libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0",
     "librt.so.1", "libutil.so.1", "libresolv.so.2", "libnss_*.so.*", "libgcc_s.so.1", "libstdc++.so.6",
+    "libz.so.1", "libzstd.so.1", "libdrm.so.2", "libelf.so.1", "libnuma.so.1",
 )
 # From the GPU driver package: never bundled.
 LINUX_DRIVER = (
