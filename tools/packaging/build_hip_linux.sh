@@ -62,24 +62,24 @@ if [ -z "${VISION_ONLY:-}" ]; then
   # shellcheck disable=SC2086
   cmake -G Ninja -S engine -B "$OUT/b" -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_HIP=ON -DSTRATA_ENABLE_CUDA=OFF -DSTRATA_BUILD_TESTS=OFF \
     "-DCMAKE_HIP_ARCHITECTURES=$ARCHS" "${HIPDEFS[@]}" ${GGML[@]+"${GGML[@]}"} -DSTRATA_PORTABLE=ON \
-    "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,'\$ORIGIN' -Wl,--enable-new-dtags" ${STRATA_CMAKE_EXTRA:-} $shape_cmake > "$OUT/cfg.log" 2>&1
+    "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-rpath,'\$ORIGIN' -Wl,--enable-new-dtags" ${STRATA_CMAKE_EXTRA:-} $shape_cmake 2>&1 | tee "$OUT/cfg.log"
   chk $? "engine configured"
-  nice -n 10 cmake --build "$OUT/b" --target strata -j "$JOBS" > "$OUT/build.log" 2>&1
+  nice -n 10 cmake --build "$OUT/b" --target strata -j "$JOBS" 2>&1 | tee "$OUT/build.log"
   chk $? "engine built"
   [ -x "$OUT/b/strata" ] || { st "ABORT no strata"; exit 1; }
 fi
 # strata-vision is Strata's own reader (terminal/tools/vision/own): no llama.cpp source, LLAMA does not reach it
 # the CPU reader: portable (AVX2), the fallback that runs on any PC
 cmake -G Ninja -S terminal/tools/vision -B "$OUT/bv" -DCMAKE_BUILD_TYPE=Release -DSTRATA_VISION_CUDA=OFF \
-  -DSTRATA_PORTABLE=ON > "$OUT/cfg-vision.log" 2>&1
-nice -n 10 cmake --build "$OUT/bv" --target strata-vision -j "$JOBS" > "$OUT/build-vision.log" 2>&1
+  -DSTRATA_PORTABLE=ON 2>&1 | tee "$OUT/cfg-vision.log"
+nice -n 10 cmake --build "$OUT/bv" --target strata-vision -j "$JOBS" 2>&1 | tee "$OUT/build-vision.log"
 chk $? "cpu reader built"
 [ -x "$OUT/bv/bin/strata-vision" ] || { st "ABORT no strata-vision"; exit 1; }
 # the GPU reader: our HIP tower for the same archs; the CPU kernels in it are portable too
 cmake -G Ninja -S terminal/tools/vision -B "$OUT/bh" -DCMAKE_BUILD_TYPE=Release -DSTRATA_VISION_HIP=ON \
-  "-DSTRATA_VISION_HIP_ARCHS=$ARCHS" -DSTRATA_PORTABLE=ON "${HIPDEFS[@]}" ${VISION_HIP_DEFS:-} > "$OUT/cfg-vision-hip.log" 2>&1
+  "-DSTRATA_VISION_HIP_ARCHS=$ARCHS" -DSTRATA_PORTABLE=ON "${HIPDEFS[@]}" ${VISION_HIP_DEFS:-} 2>&1 | tee "$OUT/cfg-vision-hip.log"
 chk $? "gpu reader configured"
-nice -n 10 cmake --build "$OUT/bh" --target strata-vision -j "$JOBS" > "$OUT/build-vision-hip.log" 2>&1
+nice -n 10 cmake --build "$OUT/bh" --target strata-vision -j "$JOBS" 2>&1 | tee "$OUT/build-vision-hip.log"
 chk $? "gpu reader built"
 [ -x "$OUT/bh/bin/strata-vision-hip" ] || { st "ABORT no strata-vision-hip"; tail -20 "$OUT/build-vision-hip.log" >> "$S"; exit 1; }
 [ -n "${VISION_ONLY:-}" ] && { st "VISION-DONE"; exit 0; }
@@ -94,7 +94,7 @@ BINS=("$OUT/b/strata" "$OUT/bh/bin/strata-vision-hip")
 for b in "${BINS[@]}"; do
   python3 tools/packaging/collect_libs.py --binary "$b" --search "$LIBW/lib" --search "$HP/lib" --search "$CORE/lib" --search "$CORE/lib/llvm/lib" ${SYSDEPS:+--search "$HP/lib/rocm_sysdeps/lib"} \
     --also 'libamd_comgr.so*' --also 'libhiprtc*.so*' --out "$STAGE" \
-    "${DATA[@]}" >> "$OUT/collect.log" 2>&1
+    "${DATA[@]}" 2>&1 | tee -a "$OUT/collect.log"
   chk $? "collected for $(basename "$b")"
   DATA=()                                              # the kernel data once
 done
@@ -121,18 +121,18 @@ for f in "$STAGE"/*.so "$STAGE"/*.so.*; do [ -f "$f" ] && [ ! -L "$f" ] && patch
 for f in "$STAGE/strata" "$STAGE/strata-vision" "$STAGE/strata-vision-hip"; do
   st "RUNPATH $(basename "$f"): $(readelf -d "$f" | grep -E 'RPATH|RUNPATH' | cut -d'[' -f2 | tr -d ']' | paste -sd' ')"
 done
-if [ -n "${SHAPE:-}" ]; then shape_check "$STAGE/strata" >> "$S" 2>&1; chk $? "shape $SHAPE"; fi
+if [ -n "${SHAPE:-}" ]; then shape_check "$STAGE/strata" 2>&1 | tee -a "$S"; chk $? "shape $SHAPE"; fi
 # the hipBLASLt version of this ROCm into BUILD.json, and the tuning tables of terminal/tools/hip that match it (architecture and version) into tuning/
-python3 tools/packaging/stage_tuning.py --stage "$STAGE" --archs "$ARCHLIST" --rocm "$HP" >> "$OUT/stage_tuning.log" 2>&1
+python3 tools/packaging/stage_tuning.py --stage "$STAGE" --archs "$ARCHLIST" --rocm "$HP" 2>&1 | tee -a "$OUT/stage_tuning.log"
 trc=$?; st "tuning tables rc=$trc: $(tail -n 1 "$OUT/stage_tuning.log")"; [ "$trc" = 0 ] || { st "ABORT tuning tables"; exit 1; }
 [ -n "${NO_PACKAGE:-}" ] && { st "STAGE-DONE"; exit 0; }
 rm -rf "$OUT/components"; mkdir -p "$OUT/components/engine"
 ARCHARGS=""; for a in $ARCHLIST; do ARCHARGS="$ARCHARGS --arch $a"; done
 python3 tools/packaging/package_engine.py --src "$STAGE" --backend hip --version "$PKGVER" --out "$OUT/components/engine" $ARCHARGS \
-  --variant "$V" --build-id "$COMMIT+rocm" --tree $shape_pkg --notes "AMD $V build: engine, CPU picture reader, GPU picture reader${NOTE_EXTRA:-}" > "$OUT/package.log" 2>&1
+  --variant "$V" --build-id "$COMMIT+rocm" --tree $shape_pkg --notes "AMD $V build: engine, CPU picture reader, GPU picture reader${NOTE_EXTRA:-}" 2>&1 | tee "$OUT/package.log"
 chk $? "packaged"
 cat "$OUT/package.log" >> "$S"
 # every library a bundled file needs is in the package or on binary_deps.py's short base-system list (glibc, libgcc_s, libstdc++);
 # collect_libs.py bundles libatomic.so.1 (librocm_sysdeps_numa.so.1 needs it) with its notice in licenses/
-for d in "$OUT/components/engine"/*/; do python3 tools/packaging/binary_deps.py "$d" >> "$S" 2>&1; chk $? "imports covered in $(basename "$d")"; done
+for d in "$OUT/components/engine"/*/; do python3 tools/packaging/binary_deps.py "$d" 2>&1 | tee -a "$S"; chk $? "imports covered in $(basename "$d")"; done
 st "BUILD-DONE"
