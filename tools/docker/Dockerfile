@@ -27,6 +27,7 @@ ARG BASE_IMAGE=ubuntu:24.04
 # ---- 1. the Terminal: the release archive, built here (pinned CPython 3.12 + hash-locked wheels, installed at build time only)
 FROM ${BASE_IMAGE} AS terminal
 ENV DEBIAN_FRONTEND=noninteractive
+RUN sed -i -E 's/(archive|security)\.ubuntu\.com/mirror\.yandex\.ru/' /etc/apt/sources.list.d/ubuntu.sources
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -46,6 +47,7 @@ RUN test -f /opt/strata/terminal/third_party/strata-gguf-py/gguf/__init__.py
 # ---- 2. the engine package, checked before it is allowed into the image: every file's hash, and every library it imports is
 #         bundled or belongs to the OS / GPU driver (packaging/binary_deps.py, the check the packager runs)
 FROM ${BASE_IMAGE} AS verify
+RUN sed -i -E 's/(archive|security)\.ubuntu\.com/mirror\.yandex\.ru/' /etc/apt/sources.list.d/ubuntu.sources
 COPY --from=terminal /opt/strata/terminal /opt/strata/terminal
 COPY terminal-src/tools/packaging/package_engine.py terminal-src/tools/packaging/binary_deps.py /opt/strata/terminal/packaging/
 COPY engine/ /engine/
@@ -58,6 +60,7 @@ RUN set -e; n=0; for d in /engine/*/; do \
 
 # ---- 3. the runtime image
 FROM ${BASE_IMAGE}
+RUN sed -i -E 's/(archive|security)\.ubuntu\.com/mirror\.yandex\.ru/' /etc/apt/sources.list.d/ubuntu.sources
 ARG FLAVOR=cuda
 ARG STRATA_VERSION=dev
 ARG ENGINE_LABEL=
